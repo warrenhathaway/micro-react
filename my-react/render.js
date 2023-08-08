@@ -14,16 +14,35 @@ function createDom(fiber) {
   return dom
 }
 function render(element, container) {
-  nextUnitOfwork = {
+   wipRoot = {
     dom: container,
     props: {
       children: [element]
     }
   }
+  nextUnitOfwork = wipRoot
 }
 
 
 let nextUnitOfwork = null
+let wipRoot = null
+
+function commitRoot() {
+  commitWork(wipRoot.child)
+  wipRoot = null
+}
+
+function commitWork(fiber) {
+  if(!fiber) {
+    return
+  }
+  const parentDOM = fiber.parent.dom
+  parentDOM.appendChild(fiber.dom)
+  commitWork(fiber.child)
+  commitWork(fiber.sibling)
+}
+
+// 调度函数
 function workLoop(deadline) {
   let shouleYield = false
   while(nextUnitOfwork && !shouleYield) {
@@ -32,6 +51,11 @@ function workLoop(deadline) {
     shouleYield = deadline.timeRemaining() < 1
   }
   requestIdleCallback(workLoop)
+
+  // commit阶段
+  if(!nextUnitOfwork && wipRoot) {
+    commitRoot()
+  }
 }
 
 requestIdleCallback(workLoop)
@@ -41,12 +65,12 @@ function performUnitOfWork(fiber) {
     fiber.dom = createDom(fiber)
   }
 
-  if(fiber.parent) {
-    fiber.parent.dom.appendChild(fiber.dom)
-  }
+  // 将render和commit分离
+  // if(fiber.parent) {
+  //   fiber.parent.dom.appendChild(fiber.dom)
+  // }
 
   const elements = fiber.props.children
-  debugger
   let index = 0
   let prevSibling = null
 
