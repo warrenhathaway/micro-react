@@ -18,17 +18,25 @@ function render(element, container) {
     dom: container,
     props: {
       children: [element]
-    }
+    },
+    sibling: null,
+    parent: null,
+    child: null,
+    alternate: currentRoot
   }
+  deletions = []
   nextUnitOfwork = wipRoot
 }
 
 
 let nextUnitOfwork = null
 let wipRoot = null
-
+let currentRoot = null
+let deletions = null
 function commitRoot() {
+  deletions.forEach(commitWork)
   commitWork(wipRoot.child)
+  currentRoot = wipRoot
   wipRoot = null
 }
 
@@ -37,9 +45,37 @@ function commitWork(fiber) {
     return
   }
   const parentDOM = fiber.parent.dom
-  parentDOM.appendChild(fiber.dom)
+  if(fiber.effectTag === "PLACEMENT" && fiber.dom) {
+    parentDOM.appendChild(fiber.dom)
+  } else if(fiber.effectTag === "DELETION" && fiber.dom) {
+    parentDOM.removeChild(fiber.dom)
+  } else if(fiber.effectTag === "UPDATE" && fiber.dom) {
+    updateDom(fiber.dom, fiber.alternate.props, fiber.props)
+  }
   commitWork(fiber.child)
   commitWork(fiber.sibling)
+}
+
+function updateDom(dom, prevProps, nextProps) {
+  const isEvent = key => key.startsWith('on')
+  // 删除没有的或者发生改变的事件处理
+  Object.keys(prevProps).filter(isEvent).filter(key => !key in nextProps || prevProps[key] !== nextProps[key])
+  .forEach(key => {
+    const eventType = key.toLowerCase().substring(2)
+    dom.removeEventListener(eventType, prevProps[key])
+  })
+  // 添加事件
+  Object.keys(nextProps).filter(isEvent).filter(key => prevProps[key] !== nextProps[key])
+  .forEach(key => {
+    const eventType = key.toLowerCase().substring(2)
+    dom.addEventListener(eventType, nextProps[key])
+  })
+  // 删除已经没有的props
+  Object.keys(prevProps).filter(key => key !== 'children').filter(key => !key in nextProps).forEach(name => dom[name] = '')
+  // 赋予新的或者改变的props
+  Object.keys(nextProps).filter(key => key !== 'children').filter(key => !key in prevProps || prevProps[key] !== prevProps).forEach(key => {
+    dom[key] = nextProps[key]
+  })
 }
 
 // 调度函数
@@ -65,31 +101,8 @@ function performUnitOfWork(fiber) {
     fiber.dom = createDom(fiber)
   }
 
-  // 将render和commit分离
-  // if(fiber.parent) {
-  //   fiber.parent.dom.appendChild(fiber.dom)
-  // }
-
   const elements = fiber.props.children
-  let index = 0
-  let prevSibling = null
-
-  while(index < elements.length) {
-    const element = elements[index]
-    const newFiber = {
-      type: element.type,
-      props: element.props,
-      parent: fiber,
-      dom: null,
-    }
-    if(index == 0) {
-      fiber.child = newFiber
-    } else {
-      prevSibling.sibling = newFiber
-    }
-    prevSibling = newFiber
-    index++
-  }
+  reconcileChildren(fiber, elements)
 
   if(fiber.child) {
     return fiber.child
@@ -103,4 +116,58 @@ function performUnitOfWork(fiber) {
   }
 
 }
+
+function reconcileChildren(wipFiber, elements) {
+  let index = 0
+  let oldFiber = wipFiber.alternate && wipFiber.alternate.child
+  let prevSibling = null
+  while(index < elements.length || oldFiber) {
+    const element = elements[index]
+    const sameType =  element && oldFiber && element.type === oldFiber.type
+    let newFiber = null
+
+    if(sameType) {
+      // 更新
+      newFiber = {
+        type: oldFiber.type,
+        props: element.props,
+        dom: oldFiber.dom,
+        parent: wipFiber,
+        alternate: oldFiber,
+        effectTag: "UPDATE",
+      }
+    }
+
+    if(element && !sameType) {
+      // 新建
+      newFiber = {
+        type: element.type,
+        props: element.props,
+        dom: null,
+        parent: wipFiber,
+        alternate: oldFiber,
+        effectTag: "PLACEMENT",
+      }
+    }
+
+    if(oldFiber && !sameType) {
+      // 删除
+      oldFiber.effectTag = "DELETION"
+      deletions.push(oldFiber)
+    }
+
+    if(oldFiber) {
+      oldFiber = oldFiber.sibling
+    }
+
+    if(index === 0) {
+      wipFiber.child = newFiber
+    } else {
+      prevSibling.sibling = newFiber
+    }
+    prevSibling = newFiber
+    index++
+  }
+}
+
 export default render
