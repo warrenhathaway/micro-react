@@ -44,11 +44,18 @@ function commitWork(fiber) {
   if(!fiber) {
     return
   }
-  const parentDOM = fiber.parent.dom
+  
+  let domParentFiber = fiber.parent
+  while(!domParentFiber.dom) {
+    domParentFiber = domParentFiber.parent
+  }
+  const parentDOM = domParentFiber.dom
+  // const parentDOM = fiber.parent.dom
   if(fiber.effectTag === "PLACEMENT" && fiber.dom) {
     parentDOM.appendChild(fiber.dom)
-  } else if(fiber.effectTag === "DELETION" && fiber.dom) {
-    parentDOM.removeChild(fiber.dom)
+  } else if(fiber.effectTag === "DELETION") {
+    // parentDOM.removeChild(fiber.dom)
+    commitDeletion(fiber, parentDOM)
   } else if(fiber.effectTag === "UPDATE" && fiber.dom) {
     updateDom(fiber.dom, fiber.alternate.props, fiber.props)
   }
@@ -56,6 +63,13 @@ function commitWork(fiber) {
   commitWork(fiber.sibling)
 }
 
+function commitDeletion(fiber, parentDOM) {
+  if(fiber.dom) {
+    parentDOM.removeChild(fiber.dom)
+  } else {
+    commitDeletion(fiber.child, parentDOM)
+  }
+}
 function updateDom(dom, prevProps, nextProps) {
   const isEvent = key => key.startsWith('on')
   // 删除没有的或者发生改变的事件处理
@@ -97,12 +111,12 @@ function workLoop(deadline) {
 requestIdleCallback(workLoop)
 
 function performUnitOfWork(fiber) {
-  if(!fiber.dom) {
-    fiber.dom = createDom(fiber)
+  const isFunctionComponent = fiber.type instanceof Function
+  if(isFunctionComponent) {
+    updateFunctionComponent(fiber)
+  } else {
+    updateHostComponent(fiber)
   }
-
-  const elements = fiber.props.children
-  reconcileChildren(fiber, elements)
 
   if(fiber.child) {
     return fiber.child
@@ -115,6 +129,18 @@ function performUnitOfWork(fiber) {
     nextFiber = nextFiber.parent
   }
 
+}
+
+function updateHostComponent(fiber) {
+  if(!fiber.dom) {
+    fiber.dom = createDom(fiber)
+  }
+  const elements = fiber.props.children
+  reconcileChildren(fiber, elements)
+}
+function updateFunctionComponent(fiber) {
+  const elements = [fiber.type(fiber.props)]
+  reconcileChildren(fiber, elements)
 }
 
 function reconcileChildren(wipFiber, elements) {
